@@ -4,11 +4,11 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import login, logout
-from django.contrib.auth.models import User
+from . import models
 from .serializers import UserSerializer, LoginSerializer
 
 class RegisterView(generics.CreateAPIView):
-    queryset = User.objects.all()
+    queryset = models.CustomeUser.objects.all()
     permission_classes = (AllowAny,)
     serializer_class = UserSerializer
 
@@ -27,7 +27,8 @@ def login_view(request):
                 'username': user.username,
                 'email': user.email,
                 'first_name': user.first_name,
-                'last_name': user.last_name
+                'last_name': user.last_name,
+                'national_code':user.national_code,
             },
             'refresh': str(refresh),
             'access': str(refresh.access_token),

@@ -69,7 +69,7 @@ SIMPLE_JWT = {
 
 ROOT_URLCONF = 'manage_library.urls'
 
-
+AUTH_USER_MODEL = 'Account.CustomeUser'
 
 
 

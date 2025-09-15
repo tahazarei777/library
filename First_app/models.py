@@ -1,5 +1,5 @@
 from django.db import models
-from django.contrib.auth.models import User
+from Account.models import CustomeUser as  User
 from django.utils import timezone
 
 class Category(models.Model):
