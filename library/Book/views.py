@@ -8,22 +8,24 @@ from .models import Category, Book, Transaction, Inventory
 from .permissions import IsAdminOrLibrarian, IsAdminOrStorekeeper,IsStorekeeper,IsAdmin
 from rest_framework.views import APIView
 from django.db import models, transaction
-from .serializers import (CategorySerializer, BookSerializer, TransactionSerializer, 
-                         BookRequestSerializer, InventorySerializer,
-                         BookStoreSerializer, BookStockUpdateSerializer)
-
+from .serializers import (CategorySerializer, BookSerializer, TransactionSerializer,BookRequestSerializer, InventorySerializer,BookStoreSerializer, BookStockUpdateSerializer)
 
 class CategoryViewSet(viewsets.ModelViewSet):
     queryset = Category.objects.all()
     serializer_class = CategorySerializer
-    permission_classes = [IsAdminOrLibrarian] 
+    permission_classes = [IsAdminOrLibrarian]
     filter_backends = [filters.SearchFilter]
     search_fields = ['name', 'description']
     
     @action(detail=True, methods=['get'], permission_classes=[IsAdminOrLibrarian])
     def books(self, request, pk=None):
         category = self.get_object()
-        books = category.books.all()
+        books = Book.objects.filter(category=category) 
+        page = self.paginate_queryset(books)
+        if page is not None:
+            serializer = BookSerializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+            
         serializer = BookSerializer(books, many=True)
         return Response(serializer.data)
 
@@ -37,14 +39,14 @@ class BookViewSet(viewsets.ModelViewSet):
     ordering = ['-price']
     
     def get_permissions(self):
-        if self.action in ['list', 'retrieve', 'available_books', 'by_category', 'search']:
+        if self.action in ['list', 'retrieve']:
             return [IsAdmin()] 
         elif self.action in ['create', 'update', 'partial_update', 'destroy']:
             return [IsAdminOrLibrarian()] 
-        elif self.action in ['store_view', 'update_stock']:
+        elif self.action in ['store_manage', 'store_view']:
             return [IsStorekeeper()]  
         else:
-            return [IsAdminOrLibrarian()] 
+            return [IsAdminOrLibrarian()]
     
     def get_queryset(self):
         queryset = super().get_queryset()
@@ -53,148 +55,206 @@ class BookViewSet(viewsets.ModelViewSet):
             return queryset.only('id', 'title', 'author', 'total_count', 'available_count')
         
         return queryset
-    @action(detail=False, methods=['get'], permission_classes=[IsAdmin])
+    
+    def get_serializer_class(self):
+        if self.action == 'store_view':
+            return BookStoreSerializer
+        elif self.action == 'store_manage':
+            return BookStockUpdateSerializer
+        return super().get_serializer_class()
+    
+    @action(detail=False, methods=['get'])
     def available_books(self, request):
         books = Book.objects.filter(available_count__gt=0)
         serializer = self.get_serializer(books, many=True)
         return Response(serializer.data)
     
-    @action(detail=False, methods=['get'], permission_classes=[IsAdmin])
-    def by_category(self, request):
-        category_id = request.query_params.get('category_id')
-        if category_id:
-            books = Book.objects.filter(category_id=category_id)
-        else:
-            books = Book.objects.all()
-        
+    @action(detail=False, methods=['get'])
+    def store_view(self, request):
+        books = self.get_queryset()
         serializer = self.get_serializer(books, many=True)
         return Response(serializer.data)
     
-    @action(detail=False, methods=['get'], permission_classes=[IsAdmin])
-    def search(self, request):
-        query = request.query_params.get('q', '')
-        books = Book.objects.filter(
-            models.Q(title__icontains=query) | 
-            models.Q(author__icontains=query) |
-            models.Q(category__name__icontains=query)
-        )
-        serializer = self.get_serializer(books, many=True)
-        return Response(serializer.data)
-
-    @action(detail=True, methods=['post'], permission_classes=[IsAdminOrLibrarian])
-    def return_books(self, request, pk=None):
-        transaction = self.get_object()
-        return_quantity = request.data.get('quantity', transaction.quantity)
-        
-        try:
-            transaction.return_books(return_quantity)
-            serializer = self.get_serializer(transaction)
-            return Response(serializer.data)
-        except ValueError as e:
-            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
-    
-    
-    @action(detail=True, methods=['patch'], permission_classes=[IsAdminOrStorekeeper])
+    @action(detail=True, methods=['patch'])
     def store_manage(self, request, pk=None):
-        if request.method == 'GET':
-            books = Book.objects.all().only(
-                'id', 'title', 'author', 'total_count', 'available_count'
-            )
-            serializer = BookStoreSerializer(books, many=True)
+        book = self.get_object()
+        
+        allowed_fields = ['total_count', 'available_count']
+        data = {key: request.data.get(key) for key in allowed_fields if key in request.data}
+        
+        if not data:
+            return Response({'error': 'هیچ فیلد مجازی برای آپدیت ارسال نشده'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        if 'available_count' in data and data['available_count'] > book.total_count:
+            return Response({'error': 'تعداد موجود نمی‌تواند از تعداد کل بیشتر باشد'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        serializer = self.get_serializer(book, data=data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
             return Response(serializer.data)
-    
-        elif request.method == 'PATCH':
-            book_id = request.data.get('book_id')
-            if not book_id:
-                return Response({'error': 'شناسه کتاب ارسال نشده'}, status=status.HTTP_400_BAD_REQUEST)
-    
-            try:
-                book = Book.objects.get(id=book_id)
-            except Book.DoesNotExist:
-                return Response({'error': 'کتاب یافت نشد'}, status=status.HTTP_404_NOT_FOUND)
-    
-            allowed_fields = ['total_count', 'available_count']
-            data = {key: request.data.get(key) for key in allowed_fields if key in request.data}
-    
-            if not data:
-                return Response({'error': 'هیچ فیلد مجازی برای آپدیت ارسال نشده'}, status=status.HTTP_400_BAD_REQUEST)
-    
-            if 'available_count' in data and data['available_count'] > book.total_count:
-                return Response({'error': 'تعداد موجود نمی‌تواند از تعداد کل بیشتر باشد'}, status=status.HTTP_400_BAD_REQUEST)
-    
-            serializer = BookStockUpdateSerializer(book, data=data, partial=True)
-            if serializer.is_valid():
-                serializer.save()
-                return Response(serializer.data)
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 class InventoryViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = InventorySerializer
-    permission_classes = [IsAdminOrStorekeeper]  
+    permission_classes = [IsAdminOrStorekeeper]
     
     def get_queryset(self):
-        if self.request.user.user_type == 'storekeeper':
-            return Inventory.objects.filter(book__available_count__gt=0)
-        elif self.request.user.user_type == 'admin':
-            return Inventory.objects.all()
-        else:
-            return Inventory.objects.none()
+        user = self.request.user
+        if hasattr(user, 'user_type'):
+            if user.user_type == 'storekeeper':
+                return Inventory.objects.filter(book__available_count__gt=0)
+            elif user.user_type == 'admin':
+                return Inventory.objects.all()
+        
+        return Inventory.objects.none()
     
     @action(detail=True, methods=['post'], permission_classes=[IsAdminOrStorekeeper])
     def replenish(self, request, pk=None):
         inventory = self.get_object()
-        inventory.check_and_replenish()
-        serializer = self.get_serializer(inventory)
-        return Response(serializer.data)
+        if hasattr(inventory, 'check_and_replenish'):
+            try:
+                inventory.check_and_replenish()
+                inventory.refresh_from_db()
+                serializer = self.get_serializer(inventory)
+                return Response(serializer.data)
+            except Exception as e:
+                return Response(
+                    {'error': f'خطا در replenish: {str(e)}'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        else:
+            return Response(
+                {'error': 'متد check_and_replenish وجود ندارد'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
 class StorekeeperDashboardView(APIView):
     permission_classes = [IsStorekeeper]
 
     def get(self, request):
+        # فقط یک query به دیتابیس با annotate برای کارایی بهتر
+        books_data = Book.objects.aggregate(
+            total_books=models.Count('id'),
+            low_stock_books=models.Count('id', filter=models.Q(available_count__lt=5)),
+            out_of_stock_books=models.Count('id', filter=models.Q(available_count=0))
+        )
+        
+        # گرفتن کتاب‌ها با pagination
         books = Book.objects.only('id', 'title', 'author', 'total_count', 'available_count')
-        low_stock_books = books.filter(available_count__lt=5)
-        out_of_stock_books = books.filter(available_count=0)
+        page = self.paginate_queryset(books)
+        if page is not None:
+            serializer = BookStoreSerializer(page, many=True)
+            return self.get_paginated_response({
+                'books': serializer.data,
+                'stats': books_data
+            })
+        
         serializer = BookStoreSerializer(books, many=True)
         return Response({
             'books': serializer.data,
-            'stats': {
-                'total_books': books.count(),
-                'low_stock_books': low_stock_books.count(),
-                'out_of_stock_books': out_of_stock_books.count(),
-            }
+            'stats': books_data
         })
+    
+    def paginate_queryset(self, queryset):
+        # پیاده‌سازی ساده pagination
+        page_size = self.request.query_params.get('page_size', 20)
+        page = self.request.query_params.get('page', 1)
+        
+        try:
+            page_size = int(page_size)
+            page = int(page)
+        except (ValueError, TypeError):
+            return None
+        
+        start = (page - 1) * page_size
+        end = start + page_size
+        
+        return list(queryset[start:end])
 
     def patch(self, request):
         updates = request.data.get('updates', [])
+        
+        # بررسی محدودیت تعداد به روزرسانی‌ها در یک درخواست
+        if len(updates) > 50:
+            return Response(
+                {'error': 'تعداد به روزرسانی‌ها نمی‌تواند بیشتر از ۵۰ مورد باشد'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
         results = []
+        successful_updates = 0
+        
         for update in updates:
             book_id = update.get('book_id')
+            if not book_id:
+                results.append({
+                    'book_id': None, 
+                    'status': 'error', 
+                    'message': 'شناسه کتاب ارائه نشده'
+                })
+                continue
+                
             try:
                 book = Book.objects.get(id=book_id)
-                serializer = BookStockUpdateSerializer(book, data=update, partial=True)
+                
+                # بررسی اینکه کاربر به این کتاب دسترسی دارد
+                # (اگر نیاز به کنترل دسترسی دقیق‌تر دارید)
+                
+                serializer = BookStockUpdateSerializer(
+                    book, 
+                    data=update, 
+                    partial=True,
+                    context={'request': request}  # افزودن context برای دسترسی به request در serializer
+                )
+                
                 if serializer.is_valid():
                     serializer.save()
-                    results.append({'book_id': book_id, 'status': 'success', 'message': 'موجودی با موفقیت به‌روز شد'})
+                    results.append({
+                        'book_id': book_id, 
+                        'status': 'success', 
+                        'message': 'موجودی با موفقیت به‌روز شد'
+                    })
+                    successful_updates += 1
                 else:
-                    results.append({'book_id': book_id, 'status': 'error', 'message': serializer.errors})
+                    results.append({
+                        'book_id': book_id, 
+                        'status': 'error', 
+                        'message': serializer.errors
+                    })
             except Book.DoesNotExist:
-                results.append({'book_id': book_id, 'status': 'error', 'message': 'کتاب یافت نشد'})
-        return Response({'results': results}, status=status.HTTP_200_OK)
+                results.append({
+                    'book_id': book_id, 
+                    'status': 'error', 
+                    'message': 'کتاب یافت نشد'
+                })
+            except Exception as e:
+                results.append({
+                    'book_id': book_id, 
+                    'status': 'error', 
+                    'message': f'خطای سیستمی: {str(e)}'
+                })
+        
+        return Response({
+            'results': results,
+            'summary': {
+                'total_updates': len(updates),
+                'successful_updates': successful_updates,
+                'failed_updates': len(updates) - successful_updates
+            }
+        }, status=status.HTTP_200_OK)
 
 class TransactionViewSet(viewsets.ReadOnlyModelViewSet):
 
-    """مشاهده تاریخچه تراکنش‌ها (فقط خواندنی)"""
     queryset = Transaction.objects.all()
     serializer_class = TransactionSerializer
     
     def get_queryset(self):
-        # کاربران فقط تراکنش‌های خود را می‌بینند
         if self.request.user.user_type == 'admin':
             return Transaction.objects.all()
         return Transaction.objects.filter(user=self.request.user)
 
     @action(detail=False, methods=['post'], permission_classes=[permissions.IsAuthenticated]) 
-    @transaction.atomic # تضمین اجرای کامل یا عدم اجرای هیچکدام
+    @transaction.atomic
     def request_book(self, request):
         serializer = BookRequestSerializer(data=request.data)
         
@@ -212,11 +272,9 @@ class TransactionViewSet(viewsets.ReadOnlyModelViewSet):
                         status=status.HTTP_400_BAD_REQUEST
                     )
                 
-                # 1. کسر موجودی از انبار
                 book.available_count -= quantity
                 book.save(update_fields=['available_count']) 
                 
-                # 2. ایجاد تراکنش (save() مهلت و قیمت را تنظیم می‌کند)
                 transaction = Transaction.objects.create(
                     user=request.user,
                     book=book,

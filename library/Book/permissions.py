@@ -1,29 +1,32 @@
 from rest_framework import permissions
 
-class IsAdmin(permissions.BasePermission):
-    def has_permission(self, request, view):
-        return request.user.is_authenticated and request.user.user_type == 'admin'
-
-class IsLibrarian(permissions.BasePermission):
-    def has_permission(self, request, view):
-        return request.user.is_authenticated and request.user.user_type == 'librarian'
-    def has_permission(self, request, view):
-        return request.user.is_authenticated and request.user.user_type == 'storekeeper'
-
-class IsAdminOrLibrarian(permissions.BasePermission):
-    def has_permission(self, request, view):
-        return request.user.is_authenticated and (
-            request.user.user_type == 'admin' or 
-            request.user.user_type == 'librarian'
-        )
-
-class IsAdminOrStorekeeper(permissions.BasePermission):
-    def has_permission(self, request, view):
-        return request.user.is_authenticated and (
-            request.user.user_type == 'admin' or 
-            request.user.user_type == 'storekeeper'
-        )
+class HasUserType(permissions.BasePermission):
+    allowed_types = []
     
-class IsStorekeeper(permissions.BasePermission):
     def has_permission(self, request, view):
-        return request.user.is_authenticated and request.user.user_type == 'storekeeper'
+        return (
+            request.user.is_authenticated and 
+            hasattr(request.user, 'user_type') and 
+            request.user.user_type in self.allowed_types
+        )
+
+class IsAdmin(HasUserType):
+    allowed_types = ['admin']
+
+class IsLibrarian(HasUserType):
+    allowed_types = ['librarian']
+
+class IsStorekeeper(HasUserType):
+    allowed_types = ['storekeeper']
+
+class IsAdminOrLibrarian(HasUserType):
+    allowed_types = ['admin', 'librarian']
+
+class IsAdminOrStorekeeper(HasUserType):
+    allowed_types = ['admin', 'storekeeper']
+
+class IsLibrarianOrStorekeeper(HasUserType):
+    allowed_types = ['librarian', 'storekeeper']
+
+class IsAdminOrLibrarianOrStorekeeper(HasUserType):
+    allowed_types = ['admin', 'librarian', 'storekeeper']

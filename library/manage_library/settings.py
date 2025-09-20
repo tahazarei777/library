@@ -41,12 +41,19 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'Accounts',
+    'drf_yasg',
     'Book',
     'rest_framework',
     'rest_framework_simplejwt',
     'django_filters',
-    # 'django_celery_beat',
+    'django_celery_beat',
+    'country',
+    'cities_light',
+    'resource',
+    
 ]
+
+
 AUTH_USER_MODEL = 'Accounts.CustomUser'
 
 
@@ -147,6 +154,8 @@ REST_FRAMEWORK = {
     'DEFAULT_FILTER_BACKENDS': [
         'django_filters.rest_framework.DjangoFilterBackend'
     ],
+    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
+    'PAGE_SIZE': 20
 }
 
 # SIMPLE JWT SETTINGS
@@ -177,3 +186,5 @@ CELERY_BEAT_SCHEDULE = {
         'args': (),
     },
 }
+
+REDIRECT_URL_LOGOUT='login'

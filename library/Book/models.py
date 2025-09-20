@@ -20,8 +20,6 @@ class Category(models.Model):
     def __str__(self):
         return self.name
     
-
-
 class Book(models.Model):
     LOAN = 'loan'
     PURCHASE = 'purchase'
@@ -60,10 +58,6 @@ class Book(models.Model):
     
     def __str__(self):
         return f"{self.title} - {self.author}"
-    
-
-
-
 
 class Transaction(models.Model):
     user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='transactions', verbose_name="کاربر")
@@ -74,7 +68,6 @@ class Transaction(models.Model):
     is_completed = models.BooleanField(default=False, verbose_name="تکمیل شده")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاریخ ثبت")
     
-    # ADDED: Deadline date for loan transactions
     deadline_date = models.DateTimeField(null=True, blank=True, verbose_name="مهلت بازگشت") 
 
     class Meta:

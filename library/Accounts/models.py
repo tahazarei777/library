@@ -23,6 +23,7 @@ class CustomUser(AbstractUser):
     # Fields
     username = models.CharField(
         max_length=150,
+        verbose_name='نام کاربری',
         unique=True,
         validators=[validate_slug],
         error_messages={
